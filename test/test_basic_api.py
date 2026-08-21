@@ -1,8 +1,10 @@
+import os
 import py
 import shutil
+import subprocess
 import tempfile
 from pytest import raises, mark
-from support import setup_make, IS_MAC
+from support import setup_make, IS_MAC, IS_LINUX
 
 # reuse the example01
 currpath = py.path.local(__file__).dirpath()
@@ -54,6 +56,28 @@ class TestBASICAPI:
             # then copy to our rpath, and make sure it can be loaded now
             shutil.copyfile(test_dct + ".so", tpath + "/test.so")
             cppyy.load_library("test.so")
+
+    @mark.skipif(IS_LINUX == 0, reason="checks Linux dlerror text")
+    def test03a_load_library_failure_reason(self):
+        """load_library reports the dlopen failure reason"""
+
+        import cppyy
+
+        cxx = os.environ.get("CXX", "c++")
+        with tempfile.TemporaryDirectory() as tpath:
+            src = os.path.join(tpath, "empty.cxx")
+            with open(src, "w") as out:
+                print("", file=out)
+            dep = os.path.join(tpath, "libdlerrdep.so")
+            broken = os.path.join(tpath, "libdlerrbroken.so")
+            subprocess.check_call([cxx, "-shared", "-fPIC", "-o", dep, src])
+            subprocess.check_call(
+                [cxx, "-shared", "-fPIC", "-o", broken, src,
+                 "-L"+tpath, "-Wl,--no-as-needed", "-l:libdlerrdep.so"])
+            os.remove(dep)   # makes the DT_NEEDED entry unresolvable
+
+            with raises(RuntimeError, match="libdlerrdep.so"):
+                cppyy.load_library(broken)
 
     def test04_add_include_path(self):
         import cppyy
