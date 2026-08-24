@@ -115,11 +115,6 @@ def cppinterop_cxx_shim():
         executable = True,
     )
 
-def _cppinterop_lib_define():
-    # solib runfiles path via $(rlocationpath) (resolves external or main-repo).
-    # The \" escaping survives Bazel's copt tokenization as a source string literal.
-    return "-DCPPINTEROP_LIB_PATH=\\\"$(rlocationpath @cppinterop//:solib)\\\""
-
 def _cppinterop_test_common(name, srcs, extra_copts, extra_deps, data, env, includes):
     return dict(
         name = name,
@@ -155,7 +150,7 @@ def cppinterop_cc_test(name, srcs, extra_copts = [], extra_deps = [], extra_dyna
         name = name,
         srcs = srcs,
         # upstream main.cpp provides main(), so gtest (not gtest_main).
-        extra_copts = CPPINTEROP_COPTS + extra_copts + [_cppinterop_lib_define()],
+        extra_copts = CPPINTEROP_COPTS + extra_copts,
         extra_deps = extra_deps,
         data = data,
         env = _jit_cxx_env(cppinterop_base_env(cppinterop_is_self) | {"PATH": cxx_shim_dir + ":/usr/bin:/bin"} | env),
@@ -178,23 +173,22 @@ def cppinterop_cc_test(name, srcs, extra_copts = [], extra_deps = [], extra_dyna
 def cppinterop_dispatch_cc_test(name, srcs):
     """DispatchTests: dlopen's clangCppInterOp, so NO solib/llvm linkage."""
     cppinterop_is_self = is_main_repo(native.repository_name())
-    cxx_shim_dir = repo_rloc("@cppinterop", cppinterop_is_self) + "/cxx_shim"
+    cppinterop_rloc = repo_rloc("@cppinterop", cppinterop_is_self)
+    cxx_shim_dir = cppinterop_rloc + "/cxx_shim"
     base_env = cppinterop_base_env(cppinterop_is_self)
     base = _cppinterop_test_common(
         name = name,
         srcs = srcs,
-        # dlopen by bare soname so LD_LIBRARY_PATH resolves it regardless of
-        # whether cppinterop is the main repo or a dependency. No LLVM link.
-        extra_copts = BASE_COPTS + [
-            "-DCPPINTEROP_LIB_PATH=\\\"libclangCppInterOp.so\\\"",
-        ],
+        # No LLVM link: the tests dlopen the solib at runtime.
+        extra_copts = BASE_COPTS,
         extra_deps = [],
         # solib arrives via dlopen at runtime; the common data already ships it.
         data = [],
-        # Add the solib's dir to the dlopen search path (it lands in the repo's
-        # lib/ under runfiles -- "lib" when cppinterop is main, the repo_rloc dir
-        # when it's a dependency).
+        # CPPINTEROP_BIN_DIR is the artifacts prefix the tests dlopen
+        # <prefix>/lib/libclangCppInterOp.so from; the solib's shared_lib_name
+        # gives it that lib/ component under runfiles, whose root is the cwd.
         env = _jit_cxx_env(base_env | {
+            "CPPINTEROP_BIN_DIR": cppinterop_rloc,
             "PATH": cxx_shim_dir + ":/usr/bin:/bin",
             "LD_LIBRARY_PATH": base_env["LD_LIBRARY_PATH"] + ":lib",
         }),
